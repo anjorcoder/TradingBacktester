@@ -1,5 +1,16 @@
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+# Streamlit Cloud runs app.py from the repository root and installs only
+# requirements.txt. Add ./src explicitly so the local package imports work
+# without requiring `pip install -e .` or PYTHONPATH configuration.
+ROOT = Path(__file__).resolve().parent
+SRC = ROOT / "src"
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
+
 import plotly.express as px
 import streamlit as st
 
