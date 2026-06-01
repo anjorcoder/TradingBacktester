@@ -13,7 +13,17 @@ def load_prices(tickers: list[str] | None = None, period: str = "10y") -> pd.Dat
     try:
         import yfinance as yf
 
-        data = yf.download(tickers, period=period, auto_adjust=True, progress=False, group_by="column")
+        data = yf.download(
+            tickers,
+            period=period,
+            auto_adjust=True,
+            progress=False,
+            group_by="column",
+            threads=False,
+            timeout=15,
+        )
+        if data.empty:
+            return demo_prices(tickers)
         if isinstance(data.columns, pd.MultiIndex):
             prices = data["Close"] if "Close" in data.columns.get_level_values(0) else data.xs("Close", axis=1, level=1)
         else:

@@ -19,24 +19,70 @@ from trading_agents_dashboard.data import DEFAULT_TICKERS, load_prices
 from trading_agents_dashboard.reporting import compact_scoreboard
 from trading_agents_dashboard.strategies import default_agents
 
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def cached_prices(tickers: tuple[str, ...], period: str):
+    return load_prices(list(tickers), period=period)
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def cached_backtests(
+    tickers: tuple[str, ...],
+    period: str,
+    initial_cash: float,
+    transaction_cost_bps: float,
+    slippage_bps: float,
+):
+    prices = cached_prices(tickers, period)
+    config = BacktestConfig(
+        initial_cash=initial_cash,
+        transaction_cost_bps=transaction_cost_bps,
+        slippage_bps=slippage_bps,
+    )
+    results = [run_backtest(agent, prices, config) for agent in default_agents()]
+    board = results_scoreboard(results)
+    return prices, results, board
+
+
 st.set_page_config(page_title="Trading Agents Dashboard", page_icon="📈", layout="wide")
 st.title("📈 Trading Agents Strategy Dashboard")
 st.caption("Research/backtesting MVP — geen financieel advies en geen orderuitvoering.")
 
 with st.sidebar:
     st.header("Instellingen")
-    tickers_text = st.text_input("Tickers", ", ".join(DEFAULT_TICKERS))
-    period = st.selectbox("Dataperiode", ["5y", "10y", "15y", "20y", "max"], index=1)
-    initial_cash = st.number_input("Startkapitaal", value=10_000, min_value=1_000, step=1_000)
-    transaction_cost_bps = st.number_input("Transactiekosten bps", value=2.0, min_value=0.0, step=0.5)
-    slippage_bps = st.number_input("Slippage bps", value=3.0, min_value=0.0, step=0.5)
-    run = st.button("Backtests draaien", type="primary")
+    with st.form("backtest_settings"):
+        tickers_text = st.text_input("Tickers", ", ".join(DEFAULT_TICKERS))
+        period = st.selectbox("Dataperiode", ["5y", "10y", "15y", "20y", "max"], index=1)
+        initial_cash = st.number_input("Startkapitaal", value=10_000, min_value=1_000, step=1_000)
+        transaction_cost_bps = st.number_input("Transactiekosten bps", value=2.0, min_value=0.0, step=0.5)
+        slippage_bps = st.number_input("Slippage bps", value=3.0, min_value=0.0, step=0.5)
+        run = st.form_submit_button("Backtests draaien", type="primary")
 
-tickers = [ticker.strip().upper() for ticker in tickers_text.split(",") if ticker.strip()]
-prices = load_prices(tickers, period=period)
-config = BacktestConfig(initial_cash=initial_cash, transaction_cost_bps=transaction_cost_bps, slippage_bps=slippage_bps)
-results = [run_backtest(agent, prices, config) for agent in default_agents()]
-board = results_scoreboard(results)
+    st.caption("Wijzig instellingen en klik op de knop om opnieuw te berekenen.")
+
+if not tickers_text.strip():
+    st.error("Vul minimaal één ticker in, bijvoorbeeld SPY, QQQ, GLD.")
+    st.stop()
+
+tickers = tuple(ticker.strip().upper() for ticker in tickers_text.split(",") if ticker.strip())
+params = (tickers, period, float(initial_cash), float(transaction_cost_bps), float(slippage_bps))
+
+if run or "backtest_payload" not in st.session_state or st.session_state.get("backtest_params") != params:
+    with st.spinner("Data ophalen en agents backtesten..."):
+        try:
+            st.session_state["backtest_payload"] = cached_backtests(*params)
+            st.session_state["backtest_params"] = params
+        except Exception as exc:
+            st.error(f"Backtest kon niet worden uitgevoerd: {exc}")
+            st.stop()
+
+prices, results, board = st.session_state["backtest_payload"]
+
+if board.empty or not results:
+    st.error("Geen backtestresultaten beschikbaar. Controleer de tickers of probeer een kortere periode.")
+    st.stop()
+
+st.success(f"Backtest klaar: {len(results)} agents, {len(prices)} koersdagen, {len(prices.columns)} assets.")
 
 leader = board.iloc[0]
 col1, col2, col3, col4 = st.columns(4)
@@ -48,22 +94,22 @@ col4.metric("Sharpe", f"{leader['sharpe']:.2f}")
 st.subheader("Scorebord")
 st.dataframe(
     compact_scoreboard(board),
-    use_container_width=True,
+    width="stretch",
     hide_index=True,
     column_config={
-        "cagr": st.column_config.NumberColumn("CAGR", format="%.2f%%"),
-        "max_drawdown": st.column_config.NumberColumn("Max DD", format="%.2f%%"),
+        "cagr": st.column_config.NumberColumn("CAGR", format="%.4f"),
+        "max_drawdown": st.column_config.NumberColumn("Max DD", format="%.4f"),
         "score": st.column_config.NumberColumn("Score", format="%.1f"),
     },
 )
 
 st.subheader("Equity curves")
 eq = equity_frame(results)
-st.plotly_chart(px.line(eq, x=eq.index, y=eq.columns, title="Equity curve per agent"), use_container_width=True)
+st.plotly_chart(px.line(eq, x=eq.index, y=eq.columns, title="Equity curve per agent"), width="stretch")
 
 st.subheader("Drawdowns")
 dd = drawdown_frame(results)
-st.plotly_chart(px.line(dd, x=dd.index, y=dd.columns, title="Drawdown per agent"), use_container_width=True)
+st.plotly_chart(px.line(dd, x=dd.index, y=dd.columns, title="Drawdown per agent"), width="stretch")
 
 st.subheader("Agent detail")
 selected = st.selectbox("Kies agent", [r.agent_name for r in results])
@@ -78,7 +124,7 @@ with right:
     if result.trades.empty:
         st.info("Geen trades in deze backtest.")
     else:
-        st.dataframe(result.trades.tail(20), use_container_width=True, hide_index=True)
+        st.dataframe(result.trades.tail(20), width="stretch", hide_index=True)
 
 st.info(
     "Interpretatie: de score combineert rendement, drawdown, Sharpe/Sortino, Calmar, stabiliteit en turnover. "
