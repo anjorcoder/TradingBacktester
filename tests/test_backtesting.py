@@ -57,6 +57,8 @@ def test_backtest_returns_equity_trades_positions_and_costs():
     assert result.equity.iloc[0] == 10_000
     assert len(result.equity) == len(prices)
     assert set(result.positions.columns) == set(prices.columns)
+    assert set(result.target_weights.index) == set(prices.columns)
+    assert result.target_weights.sum() <= 1.000001
     assert "cagr" in result.kpis
     assert result.kpis["costs_paid"] >= 0
 

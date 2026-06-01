@@ -24,6 +24,7 @@ class BacktestResult:
     equity: pd.Series
     returns: pd.Series
     positions: pd.DataFrame
+    target_weights: pd.Series
     trades: pd.DataFrame
     kpis: dict[str, float]
     current_signal: str
@@ -101,6 +102,7 @@ def run_backtest(agent: StrategyAgent, prices: pd.DataFrame, config: BacktestCon
         equity=equity.rename(agent.name),
         returns=net_returns.rename(agent.name),
         positions=positions,
+        target_weights=raw_weights.iloc[-1].rename("target_weight"),
         trades=trades,
         kpis=kpis,
         current_signal=agent.current_signal(prices),
